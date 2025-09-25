@@ -1,0 +1,34 @@
+version: '3.8'
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: always
+    environment:
+      POSTGRES_USER: ai_scheduler_user
+      POSTGRES_PASSWORD: ai_scheduler_password
+      POSTGRES_DB: ai_task_scheduler
+      TZ: UTC
+      PGTZ: UTC
+      LC_ALL: C
+      LANG: C
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./init.sql:/docker-entrypoint-initdb.d/init.sql
+    command: >
+      postgres
+      -c timezone='UTC'
+      -c log_timezone='UTC'
+      -c shared_preload_libraries=''
+      -c max_connections=100
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ai_scheduler_user -d ai_task_scheduler"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+volumes:
+  postgres_data:

@@ -1,0 +1,78 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id        String   @id @default(cuid())
+  email     String   @unique
+  password  String
+  name      String
+  company   String?
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  projects  Project[]
+  resources Resource[]
+
+  @@map("users")
+}
+
+model Project {
+  id          String   @id @default(cuid())
+  userId      String   @map("user_id")
+  title       String
+  description String?
+  status      String   @default("draft")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  user  User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tasks Task[]
+
+  @@map("projects")
+}
+
+model Task {
+  id             String   @id @default(cuid())
+  projectId      String   @map("project_id")
+  title          String
+  description    String?
+  estimatedHours Float?   @map("estimated_hours")
+  priority       Int      @default(50)
+  status         String   @default("pending")
+  parentTaskId   String?  @map("parent_task_id")
+  assignedTo     String?  @map("assigned_to")
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
+
+  project    Project   @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  parentTask Task?     @relation("TaskSubtasks", fields: [parentTaskId], references: [id])
+  subtasks   Task[]    @relation("TaskSubtasks")
+  assignee   Resource? @relation(fields: [assignedTo], references: [id])
+
+  @@map("tasks")
+}
+
+model Resource {
+  id          String   @id @default(cuid())
+  userId      String   @map("user_id")
+  name        String
+  role        String
+  weeklyHours Int      @default(40) @map("weekly_hours")
+  skills      String[]
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  user  User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tasks Task[]
+
+  @@map("resources")
+}
