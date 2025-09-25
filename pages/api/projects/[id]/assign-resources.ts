@@ -73,31 +73,41 @@ export default async function handler(
     const aiService = getAIService()
     const startTime = Date.now()
 
-    console.log('[API] Calling AI service for resource assignment...')
-    const assignments = await aiService.assignTasks(project.tasks, resources)
+    console.log('[API] Calling AI service for smart resource assignment...')
+    const preview = await aiService.assignTasks(project.tasks, resources)
 
     const duration = Date.now() - startTime
     console.log(`[API] AI assignment completed in ${duration}ms`)
-    console.log(`[API] Generated ${assignments.length} assignments`)
+    console.log(`[API] Generated ${preview.assignments.length} assignments with scheduling`)
 
     // Apply assignments to database
     console.log('[API] Applying assignments to database...')
-    const updatePromises = assignments.map((assignment, index) => {
-      console.log(`[API] Assigning task ${assignment.taskId} to resource ${assignment.resourceId}: ${assignment.reason}`)
+    const updatePromises = preview.assignments.map((assignment) => {
+      console.log(`[API] Assigning task ${assignment.taskId} to resource ${assignment.resourceId} (Week ${assignment.scheduledWeek}): ${assignment.reason}`)
       return prisma.task.update({
         where: { id: assignment.taskId },
-        data: { assignedTo: assignment.resourceId }
+        data: {
+          assignedTo: assignment.resourceId,
+          // Note: We could add a scheduledWeek field to the task model in the future
+          // For now, we'll store the scheduling info in the assignment reason or a separate field
+        }
       })
     })
 
     const updatedTasks = await Promise.all(updatePromises)
 
-    console.log('[API] Resource assignment completed successfully')
+    console.log('[API] Smart resource assignment completed successfully')
+    console.log(`[API] Summary: ${preview.summary.immediateAssignments} immediate, ${preview.summary.deferredAssignments} deferred, ${preview.summary.overflowTasks} overflow`)
 
     res.status(200).json({
-      message: 'Resources assigned successfully',
-      assignments: assignments,
-      updatedTasks: updatedTasks
+      message: 'Resources assigned successfully with smart scheduling',
+      preview: preview,
+      updatedTasks: updatedTasks,
+      summary: {
+        immediate: preview.summary.immediateAssignments,
+        deferred: preview.summary.deferredAssignments,
+        overflow: preview.summary.overflowTasks
+      }
     })
 
   } catch (error) {

@@ -1,4 +1,5 @@
-import { AIService, GeneratedTask } from './types'
+import { AIService, GeneratedTask, AssignmentPreview } from './types'
+import { SmartScheduler } from './smartScheduler'
 
 export class MockAIService implements AIService {
   async generateTasks(projectDescription: string): Promise<GeneratedTask[]> {
@@ -143,31 +144,69 @@ export class MockAIService implements AIService {
     }
   }
 
-  async assignTasks(tasks: any[], resources: any[]): Promise<{ taskId: string; resourceId: string; reason: string }[]> {
+  async assignTasks(tasks: any[], resources: any[]): Promise<AssignmentPreview> {
+    console.log('[Mock Service] Starting bandwidth-aware task assignment')
     // Simulate processing delay
-    await new Promise(resolve => setTimeout(resolve, 1000))
+    await new Promise(resolve => setTimeout(resolve, 1500))
 
     if (!resources.length) {
-      return []
+      return {
+        assignments: [],
+        schedules: [],
+        summary: {
+          totalTasks: tasks.length,
+          immediateAssignments: 0,
+          deferredAssignments: 0,
+          overflowTasks: tasks.length
+        }
+      }
     }
 
-    // Mock assignment logic
-    const assignments = tasks.map((task, index) => {
-      const resource = resources[index % resources.length]
-      const reasons = [
-        `Best match for ${resource.role} role`,
-        `Available capacity and relevant skills`,
-        `Experience with similar tasks`,
-        `Optimal workload distribution`
-      ]
+    const scheduler = new SmartScheduler()
 
-      return {
-        taskId: task.id,
-        resourceId: resource.id,
-        reason: reasons[Math.floor(Math.random() * reasons.length)]
-      }
-    })
+    // Transform tasks for scheduler
+    const tasksForScheduling = tasks.map((task: any) => ({
+      id: task.id,
+      title: task.title,
+      estimatedHours: task.estimatedHours || 4,
+      priority: task.priority || 50,
+      requiredRole: this.inferRequiredRole(task.title, task.description)
+    }))
 
-    return assignments
+    // Transform resources for scheduler
+    const resourcesForScheduling = resources.map((resource: any) => ({
+      id: resource.id,
+      name: resource.name,
+      role: resource.role,
+      weeklyHours: resource.weeklyHours,
+      skills: resource.skills || [],
+      currentlyAssignedHours: 0 // This would come from existing task assignments in real scenario
+    }))
+
+    console.log(`[Mock Service] Processing ${tasksForScheduling.length} tasks with ${resourcesForScheduling.length} resources`)
+
+    const preview = scheduler.assignTasksWithBandwidth(tasksForScheduling, resourcesForScheduling)
+
+    console.log('[Mock Service] Smart assignment completed')
+    return preview
+  }
+
+  private inferRequiredRole(title: string, description: string = ''): string {
+    const content = (title + ' ' + description).toLowerCase()
+
+    if (content.includes('design') || content.includes('ui') || content.includes('ux') || content.includes('mockup')) {
+      return 'designer'
+    }
+    if (content.includes('code') || content.includes('develop') || content.includes('api') || content.includes('database')) {
+      return 'developer'
+    }
+    if (content.includes('manage') || content.includes('plan') || content.includes('coordinate')) {
+      return 'manager'
+    }
+    if (content.includes('content') || content.includes('copy') || content.includes('write')) {
+      return 'copywriter'
+    }
+
+    return 'any' // Can be assigned to any role
   }
 }

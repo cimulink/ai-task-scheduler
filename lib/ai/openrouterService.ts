@@ -1,4 +1,5 @@
-import { AIService, GeneratedTask, AIConfig } from './types'
+import { AIService, GeneratedTask, AIConfig, AssignmentPreview } from './types'
+import { SmartScheduler } from './smartScheduler'
 
 export class OpenRouterService implements AIService {
   private apiKey: string
@@ -159,73 +160,69 @@ Return only a JSON object with:
     }
   }
 
-  async assignTasks(tasks: any[], resources: any[]): Promise<{ taskId: string; resourceId: string; reason: string }[]> {
+  async assignTasks(tasks: any[], resources: any[]): Promise<AssignmentPreview> {
+    console.log('[OpenRouter Service] Starting smart assignment with bandwidth awareness')
+
     if (!resources.length) {
-      return []
+      return {
+        assignments: [],
+        schedules: [],
+        summary: {
+          totalTasks: tasks.length,
+          immediateAssignments: 0,
+          deferredAssignments: 0,
+          overflowTasks: tasks.length
+        }
+      }
     }
 
-    const prompt = `Assign these tasks to the available resources based on their roles, skills, and workload:
+    // Use SmartScheduler for bandwidth-aware assignment
+    const scheduler = new SmartScheduler()
 
-Tasks:
-${tasks.map(t => `- ${t.id}: ${t.title} (${t.estimatedHours}h, Priority: ${t.priority})`).join('\n')}
+    // Transform tasks for scheduler
+    const tasksForScheduling = tasks.map((task: any) => ({
+      id: task.id,
+      title: task.title,
+      estimatedHours: task.estimatedHours || 4,
+      priority: task.priority || 50,
+      requiredRole: this.inferRequiredRole(task.title, task.description)
+    }))
 
-Resources:
-${resources.map(r => `- ${r.id}: ${r.name} (${r.role}, ${r.weeklyHours}h/week, Skills: ${r.skills.join(', ')})`).join('\n')}
+    // Transform resources for scheduler
+    const resourcesForScheduling = resources.map((resource: any) => ({
+      id: resource.id,
+      name: resource.name,
+      role: resource.role,
+      weeklyHours: resource.weeklyHours,
+      skills: resource.skills || [],
+      currentlyAssignedHours: resource.currentlyAssignedHours || 0
+    }))
 
-Return a JSON array with assignments:
-- taskId: string (task ID)
-- resourceId: string (resource ID)
-- reason: string (brief explanation for the assignment)
+    console.log(`[OpenRouter Service] Processing ${tasksForScheduling.length} tasks with ${resourcesForScheduling.length} resources using smart scheduler`)
 
-Consider role matching, skill alignment, and workload distribution.`
+    const preview = scheduler.assignTasksWithBandwidth(tasksForScheduling, resourcesForScheduling)
 
-    try {
-      const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${this.apiKey}`,
-          'Content-Type': 'application/json',
-          'HTTP-Referer': 'http://localhost:3000',
-          'X-Title': 'AI Task Scheduler'
-        },
-        body: JSON.stringify({
-          model: this.modelName,
-          messages: [
-            {
-              role: 'user',
-              content: prompt
-            }
-          ],
-          temperature: 0.5,
-          max_tokens: 1000
-        })
-      })
+    console.log('[OpenRouter Service] Smart assignment completed')
+    return preview
+  }
 
-      if (!response.ok) {
-        throw new Error(`OpenRouter API error: ${response.statusText}`)
-      }
+  private inferRequiredRole(title: string, description: string = ''): string {
+    const content = (title + ' ' + description).toLowerCase()
 
-      const data = await response.json()
-      const content = data.choices[0]?.message?.content
-
-      if (!content) {
-        throw new Error('No content received from OpenRouter API')
-      }
-
-      const cleanContent = content.replace(/```json\n?|```\n?/g, '').trim()
-      const assignments = JSON.parse(cleanContent)
-
-      return Array.isArray(assignments) ? assignments : []
-
-    } catch (error) {
-      console.error('OpenRouter assignment error:', error)
-      // Fallback to simple round-robin assignment
-      return tasks.map((task, index) => ({
-        taskId: task.id,
-        resourceId: resources[index % resources.length].id,
-        reason: 'Automatic assignment based on availability'
-      }))
+    if (content.includes('design') || content.includes('ui') || content.includes('ux') || content.includes('mockup')) {
+      return 'designer'
     }
+    if (content.includes('code') || content.includes('develop') || content.includes('api') || content.includes('database')) {
+      return 'developer'
+    }
+    if (content.includes('manage') || content.includes('plan') || content.includes('coordinate')) {
+      return 'manager'
+    }
+    if (content.includes('content') || content.includes('copy') || content.includes('write')) {
+      return 'copywriter'
+    }
+
+    return 'any'
   }
 
   private getFallbackTasks(projectDescription: string): GeneratedTask[] {

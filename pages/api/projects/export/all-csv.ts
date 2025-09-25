@@ -169,7 +169,7 @@ function generateAllProjectsCSV(projects: any[], resources: any[], user: any): s
   resources.forEach((resource: any) => {
     const totalAssignedHours = resource.tasks.reduce((sum: number, task: any) => sum + (task.estimatedHours || 0), 0)
     const utilization = Math.round((totalAssignedHours / resource.weeklyHours) * 100)
-    const activeProjects = [...new Set(resource.tasks.map((task: any) => task.project.title))].join('; ')
+    const activeProjects = Array.from(new Set(resource.tasks.map((task: any) => task.project.title))).join('; ')
 
     lines.push([
       `"${resource.id}"`,
