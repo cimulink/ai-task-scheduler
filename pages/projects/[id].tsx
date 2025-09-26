@@ -10,6 +10,7 @@ import { Modal } from '@/components/ui/Modal'
 import { AssignmentPreviewModal } from '@/components/AssignmentPreviewModal'
 import { AssignmentPreview } from '@/lib/ai/types'
 import { TaskScheduler } from '@/lib/scheduling/taskScheduler'
+import { UpdateFlowModal } from '@/components/updates/UpdateFlowModal'
 
 interface Resource {
   id: string
@@ -413,6 +414,7 @@ export default function ProjectDetail() {
   const [taskTimelines, setTaskTimelines] = useState<Map<string, any>>(new Map())
   const [resourceSchedules, setResourceSchedules] = useState<Map<string, any>>(new Map())
   const [showFullDescription, setShowFullDescription] = useState(false)
+  const [showUpdateFlow, setShowUpdateFlow] = useState(false)
 
   useEffect(() => {
     if (id) {
@@ -945,6 +947,21 @@ export default function ProjectDetail() {
                   </Button>
                 )}
 
+                {project.tasks.length > 0 && (
+                  <Button
+                    onClick={() => setShowUpdateFlow(true)}
+                    variant="outline"
+                    className="text-blue-600 border-blue-300 hover:bg-blue-50"
+                  >
+                    <div className="flex items-center space-x-2">
+                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                      </svg>
+                      <span>Update Project</span>
+                    </div>
+                  </Button>
+                )}
+
                 <Button
                   onClick={handleDeleteProject}
                   disabled={isDeleting}
@@ -1163,6 +1180,15 @@ export default function ProjectDetail() {
         preview={assignmentPreview}
         onApplyAssignments={handleApplyAssignments}
         isApplying={isAssigning}
+      />
+
+      {/* Update Flow Modal */}
+      <UpdateFlowModal
+        isOpen={showUpdateFlow}
+        onClose={() => setShowUpdateFlow(false)}
+        projectId={project.id}
+        existingTasks={project.tasks}
+        onUpdateComplete={fetchProjectAndResources}
       />
     </div>
   )

@@ -18,7 +18,7 @@ interface ResourceForScheduling {
 }
 
 export class SmartScheduler {
-  private readonly MAX_WEEKS = 8 // Plan up to 8 weeks ahead
+  private readonly MAX_WEEKS = 12 // Plan up to 12 weeks ahead for better long-term planning
   private readonly PRIORITY_THRESHOLD_HIGH = 80
   private readonly PRIORITY_THRESHOLD_MEDIUM = 50
 
@@ -52,6 +52,14 @@ export class SmartScheduler {
     let overflowTasks = 0
 
     for (const task of sortedTasks) {
+      // Skip tasks with no estimated hours or zero hours
+      if (!task.estimatedHours || task.estimatedHours <= 0) {
+        console.warn(`[Smart Scheduler] Skipping task "${task.title}" - no estimated hours (${task.estimatedHours}h)`)
+        overflowTasks++
+        continue
+      }
+
+      console.log(`[Smart Scheduler] Attempting to assign task: "${task.title}" (${task.estimatedHours}h, Priority: ${task.priority}, Role: ${task.requiredRole || 'any'})`)
       const assignment = this.findBestAssignment(task, schedules)
 
       if (assignment) {
@@ -77,13 +85,12 @@ export class SmartScheduler {
           deferredAssignments++
         }
 
-        if (assignment.isOverflow) {
-          overflowTasks++
-        }
+        // isOverflow is now always false for successfully assigned tasks
+        // overflowTasks will only be counted for unassigned tasks below
 
-        console.log(`[Smart Scheduler] Assigned "${task.title}" to ${schedule.resourceName} (Week ${assignment.scheduledWeek})`)
+        console.log(`[Smart Scheduler] ✓ Assigned "${task.title}" to ${schedule.resourceName} (Week ${assignment.scheduledWeek})`)
       } else {
-        console.warn(`[Smart Scheduler] Could not assign task: ${task.title}`)
+        console.warn(`[Smart Scheduler] ✗ Could not assign task: ${task.title}`)
         overflowTasks++
       }
     }
@@ -100,6 +107,12 @@ export class SmartScheduler {
     }
 
     console.log('[Smart Scheduler] Assignment completed:', preview.summary)
+    console.log(`[Smart Scheduler] Final Results: ${assignments.length}/${sortedTasks.length} tasks successfully assigned`)
+
+    if (overflowTasks > 0) {
+      console.warn(`[Smart Scheduler] ${overflowTasks} tasks could not be assigned within the ${this.MAX_WEEKS}-week planning horizon`)
+    }
+
     return preview
   }
 
@@ -109,20 +122,24 @@ export class SmartScheduler {
   ): TaskAssignment | null {
     let bestAssignment: TaskAssignment | null = null
     let bestScore = -1
+    let rejectionReasons: string[] = []
 
     for (const schedule of schedules) {
       // Check role compatibility
-      if (task.requiredRole && !this.isRoleCompatible(task.requiredRole, schedule.role)) {
+      const isCompatible = this.isRoleCompatible(task.requiredRole || '', schedule.role)
+      if (task.requiredRole && !isCompatible) {
+        rejectionReasons.push(`${schedule.resourceName}: Role mismatch (needs ${task.requiredRole}, has ${schedule.role})`)
         continue
       }
 
       // Find the earliest week where this task can fit
+      let foundSlot = false
       for (let weekIndex = 0; weekIndex < schedule.weeks.length; weekIndex++) {
         const week = schedule.weeks[weekIndex]
 
         if (week.availableHours >= task.estimatedHours) {
           const weekNumber = weekIndex + 1
-          const isOverflow = weekNumber > 1
+          const isOverflow = false // Never mark as overflow if we found capacity
           const score = this.calculateAssignmentScore(task, schedule, weekNumber)
 
           if (score > bestScore) {
@@ -135,27 +152,59 @@ export class SmartScheduler {
               isOverflow
             }
           }
+          foundSlot = true
           break // Found earliest available week for this resource
         }
       }
+
+      if (!foundSlot) {
+        const totalAvailable = schedule.weeks.reduce((sum, week) => sum + week.availableHours, 0)
+        rejectionReasons.push(`${schedule.resourceName}: No weekly slot with ${task.estimatedHours}h available (total available: ${totalAvailable}h across all weeks)`)
+      }
+    }
+
+    if (!bestAssignment && rejectionReasons.length > 0) {
+      console.log(`[Smart Scheduler] Task "${task.title}" rejected by all resources:`)
+      rejectionReasons.forEach(reason => console.log(`  - ${reason}`))
     }
 
     return bestAssignment
   }
 
   private isRoleCompatible(requiredRole: string, resourceRole: string): boolean {
-    // Simple role matching - can be enhanced with more sophisticated logic
+    // More flexible role matching that handles case variations and partial matches
     const roleCompatibility: Record<string, string[]> = {
-      'developer': ['Developer', 'Full Stack Developer', 'Backend Developer', 'Frontend Developer'],
-      'designer': ['Designer', 'UI Designer', 'UX Designer', 'Graphic Designer'],
-      'manager': ['Manager', 'Project Manager', 'Team Lead'],
-      'copywriter': ['Copywriter', 'Content Writer', 'Marketing Specialist']
+      'developer': ['developer', 'full stack developer', 'backend developer', 'frontend developer', 'software engineer', 'engineer'],
+      'designer': ['designer', 'ui designer', 'ux designer', 'graphic designer', 'visual designer'],
+      'manager': ['manager', 'project manager', 'team lead', 'lead', 'coordinator'],
+      'copywriter': ['copywriter', 'content writer', 'marketing specialist', 'writer']
     }
 
     const requiredRoleLower = requiredRole.toLowerCase()
-    const compatibleRoles = roleCompatibility[requiredRoleLower] || [requiredRole]
+    const resourceRoleLower = resourceRole.toLowerCase()
 
-    return compatibleRoles.includes(resourceRole) || resourceRole === 'Other'
+    // Direct match
+    if (requiredRoleLower === resourceRoleLower) {
+      return true
+    }
+
+    // Check compatibility mapping
+    const compatibleRoles = roleCompatibility[requiredRoleLower] || []
+    if (compatibleRoles.some(role => resourceRoleLower.includes(role) || role.includes(resourceRoleLower))) {
+      return true
+    }
+
+    // Allow 'Other' resources to handle any task
+    if (resourceRoleLower === 'other' || resourceRoleLower === 'general') {
+      return true
+    }
+
+    // If no specific role requirement or 'any', any resource can handle it
+    if (!requiredRole || requiredRole.trim() === '' || requiredRoleLower === 'any') {
+      return true
+    }
+
+    return false
   }
 
   private calculateAssignmentScore(
@@ -196,11 +245,7 @@ export class SmartScheduler {
         return `Available capacity this week`
       }
     } else {
-      if (isOverflow) {
-        return `Week ${weekNumber} - Current week capacity exceeded`
-      } else {
-        return `Week ${weekNumber} - Optimal scheduling based on priority`
-      }
+      return `Week ${weekNumber} - Scheduled based on capacity and priority`
     }
   }
 
@@ -217,14 +262,14 @@ export class SmartScheduler {
     const suggestions: string[] = []
 
     if (summary.overflowTasks > 0) {
-      title = "Bandwidth Exceeded"
-      description = `${summary.immediateAssignments} tasks can start this week, ${summary.deferredAssignments} tasks scheduled for later weeks.`
+      title = "Some Tasks Unscheduled"
+      description = `${summary.immediateAssignments} tasks start this week, ${summary.deferredAssignments} tasks scheduled for future weeks. ${summary.overflowTasks} tasks could not be scheduled within the planning horizon.`
 
-      suggestions.push("Consider increasing team capacity")
-      suggestions.push("Adjust task priorities to rebalance workload")
+      suggestions.push("Consider increasing team capacity for unscheduled tasks")
+      suggestions.push("Extend planning horizon beyond 12 weeks")
       suggestions.push("Split large tasks into smaller chunks")
     } else {
-      description = `All ${summary.totalTasks} tasks successfully scheduled within current capacity.`
+      description = `All ${summary.totalTasks} tasks successfully scheduled. ${summary.immediateAssignments} this week, ${summary.deferredAssignments} in upcoming weeks.`
     }
 
     // Check for over-utilized resources

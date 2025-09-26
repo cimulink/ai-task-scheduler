@@ -423,3 +423,241 @@ NODE_ENV=production
 - **Automatic CI/CD**: Git-based deployments
 - **Preview Deployments**: Branch-based previews
 - **Zero Configuration**: Works out of the box
+
+---
+
+## Update Flow Design (MVP)
+
+### 10. Project Update Workflow
+
+#### 10.1 User Story
+**As a** project manager
+**I want to** update my project with new requirements or changes
+**So that** my task list stays current without losing existing work
+
+**Acceptance Criteria:**
+- User can input project updates/changes
+- System identifies potentially affected existing tasks
+- User reviews and approves which tasks to modify
+- AI suggests modifications with new estimates and priorities
+- User can accept, reject, or edit suggested changes
+- All changes are applied atomically (all or nothing)
+
+#### 10.2 Update Flow Steps (Simple MVP Approach)
+
+**Step 1: Change Input**
+- User provides update description in a text field
+- Examples: "Add mobile responsive design", "Client wants dark mode option", "Remove blog section"
+- Max 2000 characters for MVP
+
+**Step 2: Impact Analysis (Simple)**
+- AI analyzes update text against existing task titles and descriptions
+- Uses basic keyword matching + semantic similarity
+- Flags tasks with >70% relevance score as "potentially affected"
+- Returns list of potentially affected tasks with explanation
+
+**Step 3: User Review - Task Selection**
+- Show user all potentially affected tasks in a checklist
+- User can:
+  - ✓ Confirm tasks to modify
+  - ✗ Skip tasks that shouldn't change
+  - ➕ Add new tasks if needed
+- Display current task details (title, description, hours, priority, status)
+
+**Step 4: Handle In-Progress Tasks (Safety Check)**
+- For tasks with status "in_progress":
+  - Show warning: "This task is already in progress"
+  - Ask: "Continue modifying this task? This may affect current work."
+  - User must explicitly confirm each in-progress task
+
+**Step 5: AI Modification Suggestions**
+- For each selected task, AI suggests:
+  - Updated title (if needed)
+  - Updated description (if needed)
+  - New estimated hours
+  - New priority score (1-100)
+  - Reason for changes
+- Show side-by-side comparison: Original → Suggested
+
+**Step 6: User Approval & Editing**
+- User reviews each suggested modification
+- Can accept, reject, or manually edit any field
+- Must approve time estimates specifically
+- Must approve priority changes specifically
+- Can add additional tasks if AI missed something
+
+**Step 7: Create New Tasks (If Needed)**
+- If update requires completely new tasks, AI suggests them
+- User reviews new task suggestions
+- Same approval process as modifications
+
+**Step 8: Final Review & Apply**
+- Show summary of all changes:
+  - X tasks to be modified
+  - Y new tasks to be created
+  - Z tasks unchanged
+- User confirms final changes
+- All changes applied atomically
+
+#### 10.3 Technical Implementation
+
+**Database Changes:**
+```sql
+-- Track update history
+CREATE TABLE project_updates (
+    id SERIAL PRIMARY KEY,
+    project_id INTEGER REFERENCES projects(id),
+    update_description TEXT NOT NULL,
+    affected_tasks INTEGER[],
+    created_tasks INTEGER[],
+    user_id INTEGER REFERENCES users(id),
+    created_at TIMESTAMP DEFAULT NOW()
+);
+```
+
+**API Routes:**
+```
+pages/api/projects/[id]/updates/
+├── analyze.ts          # POST - Analyze update impact
+├── preview.ts          # POST - Generate modification preview
+└── apply.ts            # POST - Apply approved changes
+```
+
+**Update Analysis Service:**
+```typescript
+interface UpdateAnalysisInput {
+  projectId: string
+  updateDescription: string
+  existingTasks: Task[]
+}
+
+interface UpdateAnalysisResult {
+  affectedTasks: {
+    taskId: string
+    relevanceScore: number
+    reason: string
+    currentStatus: string
+  }[]
+  suggestedNewTasks: {
+    title: string
+    description: string
+    estimatedHours: number
+    priority: number
+  }[]
+}
+
+class UpdateAnalyzer {
+  async analyzeUpdate(input: UpdateAnalysisInput): Promise<UpdateAnalysisResult>
+  async generateModifications(taskIds: string[], updateContext: string): Promise<TaskModification[]>
+}
+```
+
+**UI Flow Components:**
+```
+components/updates/
+├── UpdateInputForm.tsx       # Step 1: Input change description
+├── ImpactReview.tsx          # Step 3: Review affected tasks
+├── InProgressWarning.tsx     # Step 4: Handle in-progress tasks
+├── ModificationPreview.tsx   # Step 5-6: Review AI suggestions
+├── NewTasksPreview.tsx       # Step 7: Review new tasks
+└── UpdateSummary.tsx         # Step 8: Final confirmation
+```
+
+#### 10.4 Prompt Templates (Simple)
+
+**Impact Analysis Prompt:**
+```
+Project Update: {updateDescription}
+
+Existing Tasks:
+{taskList}
+
+Analyze which existing tasks might be affected by this update. Return JSON:
+{
+  "affectedTasks": [
+    {
+      "taskId": "task-123",
+      "relevanceScore": 85,
+      "reason": "This task handles user interface which needs mobile responsiveness"
+    }
+  ],
+  "suggestedNewTasks": [
+    {
+      "title": "Mobile responsive design implementation",
+      "description": "Make all UI components responsive for mobile devices",
+      "estimatedHours": 16,
+      "priority": 80
+    }
+  ]
+}
+
+Only flag tasks that are directly affected by the change. Be conservative.
+```
+
+**Task Modification Prompt:**
+```
+Update Context: {updateDescription}
+
+Current Task:
+Title: {currentTitle}
+Description: {currentDescription}
+Hours: {currentHours}
+Priority: {currentPriority}
+
+Suggest modifications needed for this update. Return JSON:
+{
+  "title": "updated title if needed",
+  "description": "updated description if needed",
+  "estimatedHours": new_estimate,
+  "priority": new_priority,
+  "reasoning": "why these changes are needed"
+}
+
+Only modify what's necessary. Keep changes minimal and focused.
+```
+
+#### 10.5 MVP Limitations & Future Enhancements
+
+**MVP Limitations:**
+- Simple keyword/semantic matching (no embeddings)
+- Manual user approval for all changes
+- No automatic priority recalculation across all tasks
+- No dependency impact analysis
+- No resource reallocation suggestions
+
+**Future V2 Enhancements:**
+- Advanced semantic similarity using embeddings
+- Smart priority redistribution
+- Dependency chain impact analysis
+- Automatic resource rebalancing
+- Change impact visualization
+- Rollback capabilities
+- Change history and diff views
+
+#### 10.6 Success Metrics
+
+**Technical Metrics:**
+- Update analysis completes in <5 seconds
+- >80% accuracy in identifying relevant tasks
+- <10% false positive rate in task matching
+- Zero data loss during update operations
+
+**User Experience Metrics:**
+- >70% user satisfaction with suggested modifications
+- <5 minutes average time to complete update flow
+- >90% of updates completed successfully
+- <20% of updates requiring manual task creation
+
+#### 10.7 Error Handling
+
+**Update Flow Error States:**
+- AI service timeout → Show manual editing options
+- Invalid task modifications → Highlight issues, allow corrections
+- Database transaction failure → Rollback, show error, retain user input
+- Partial update failure → Show what succeeded/failed, allow retry
+
+**User Guidance:**
+- Progress indicators for each step
+- Clear explanations of what each step does
+- Undo/back buttons for each step
+- Save draft capability for long update sessions

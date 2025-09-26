@@ -12,7 +12,12 @@
       "Bash(npx tsc:*)",
       "Bash(timeout 10 npm run dev)",
       "Bash(pkill:*)",
-      "Bash(taskkill:*)"
+      "Bash(taskkill:*)",
+      "Bash(lsof:*)",
+      "Bash(netstat:*)",
+      "Bash(findstr:*)",
+      "Bash(curl:*)",
+      "Bash(del \"C:\\Personal\\Projects\\ai-task-scheduler\\pages\\api\\debug\\env.ts\")"
     ],
     "deny": [],
     "ask": []

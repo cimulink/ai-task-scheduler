@@ -24,6 +24,30 @@ export const AssignmentPreviewModal: React.FC<AssignmentPreviewModalProps> = ({
 
   if (!preview) return null
 
+  // Helper function to determine how many weeks to show for a resource
+  const getRelevantWeekCount = (schedule: ResourceWeeklySchedule): number => {
+    // Find the last week with any assignments
+    let lastWeekWithTasks = 0
+    for (let i = schedule.weeks.length - 1; i >= 0; i--) {
+      if (schedule.weeks[i].tasks.length > 0) {
+        lastWeekWithTasks = i + 1
+        break
+      }
+    }
+
+    // Show at least 2 weeks (current + next), but extend to cover all assigned weeks
+    // Add one buffer week after the last assigned week
+    return Math.max(2, Math.min(lastWeekWithTasks + 1, schedule.weeks.length))
+  }
+
+  // Get global week count for consistency across all resources
+  const getGlobalRelevantWeekCount = (): number => {
+    const maxWeeksNeeded = Math.max(
+      ...preview.schedules.map(schedule => getRelevantWeekCount(schedule))
+    )
+    return Math.min(maxWeeksNeeded, 6) // Cap at 6 weeks for display
+  }
+
   const getUtilizationColor = (utilization: number) => {
     if (utilization >= 100) return 'bg-red-500'
     if (utilization >= 90) return 'bg-yellow-500'
@@ -68,7 +92,7 @@ export const AssignmentPreviewModal: React.FC<AssignmentPreviewModalProps> = ({
             </div>
             <div className="text-center">
               <div className="text-2xl font-bold text-red-600">{preview.summary.overflowTasks}</div>
-              <div className="text-gray-600">Overflow</div>
+              <div className="text-gray-600">Unscheduled</div>
             </div>
           </div>
 
@@ -79,7 +103,7 @@ export const AssignmentPreviewModal: React.FC<AssignmentPreviewModalProps> = ({
                   <path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
                 </svg>
                 <span className="text-sm font-medium text-yellow-800">
-                  Some tasks scheduled beyond current week due to capacity constraints
+                  Some tasks could not be scheduled within the 12-week planning horizon
                 </span>
               </div>
             </div>
@@ -88,7 +112,25 @@ export const AssignmentPreviewModal: React.FC<AssignmentPreviewModalProps> = ({
 
         {/* Resource Timeline View */}
         <div>
-          <h3 className="font-medium text-gray-900 mb-4">Team Schedule Timeline</h3>
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="font-medium text-gray-900">Team Schedule Timeline</h3>
+            <span className="text-sm text-gray-500">
+              Showing {getGlobalRelevantWeekCount()} weeks ({getGlobalRelevantWeekCount() === 2 ? 'current + next' : 'with assignments'})
+            </span>
+          </div>
+
+          {/* Check if there are any assignments at all */}
+          {preview.summary.immediateAssignments === 0 && preview.summary.deferredAssignments === 0 ? (
+            <div className="text-center py-8 bg-gray-50 rounded-lg">
+              <svg className="mx-auto h-12 w-12 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+              </svg>
+              <h3 className="mt-4 text-sm font-medium text-gray-900">No Tasks Scheduled</h3>
+              <p className="mt-2 text-sm text-gray-500">
+                All tasks are in the overflow/unscheduled state. Check capacity and role constraints.
+              </p>
+            </div>
+          ) : (
           <div className="space-y-4">
             {preview.schedules.map((schedule) => (
               <div key={schedule.resourceId} className="border border-gray-200 rounded-lg p-4">
@@ -113,8 +155,13 @@ export const AssignmentPreviewModal: React.FC<AssignmentPreviewModalProps> = ({
                 </div>
 
                 {/* Weekly Timeline */}
-                <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
-                  {schedule.weeks.slice(0, 4).map((week) => {
+                <div className={`grid grid-cols-1 gap-3 ${
+                  getGlobalRelevantWeekCount() <= 2 ? 'md:grid-cols-2' :
+                  getGlobalRelevantWeekCount() <= 3 ? 'md:grid-cols-3' :
+                  getGlobalRelevantWeekCount() <= 4 ? 'md:grid-cols-4' :
+                  getGlobalRelevantWeekCount() <= 5 ? 'md:grid-cols-5' : 'md:grid-cols-6'
+                }`}>
+                  {schedule.weeks.slice(0, getGlobalRelevantWeekCount()).map((week) => {
                     const utilization = Math.round((week.assignedHours / schedule.weeklyCapacity) * 100)
                     return (
                       <div key={week.weekNumber} className="bg-gray-50 p-3 rounded">
@@ -158,6 +205,13 @@ export const AssignmentPreviewModal: React.FC<AssignmentPreviewModalProps> = ({
                       </div>
                     )
                   })}
+
+                  {/* Show indicator if there are more weeks */}
+                  {getGlobalRelevantWeekCount() < schedule.weeks.length && (
+                    <div className="text-center text-sm text-gray-500 mt-2">
+                      + {schedule.weeks.length - getGlobalRelevantWeekCount()} more weeks available
+                    </div>
+                  )}
                 </div>
 
                 {/* Detailed Task List (Expandable) */}
@@ -191,6 +245,7 @@ export const AssignmentPreviewModal: React.FC<AssignmentPreviewModalProps> = ({
               </div>
             ))}
           </div>
+          )}
         </div>
 
         {/* Action Suggestions */}
@@ -199,9 +254,9 @@ export const AssignmentPreviewModal: React.FC<AssignmentPreviewModalProps> = ({
             <h4 className="font-medium text-blue-900 mb-2">💡 Optimization Suggestions</h4>
             <ul className="text-sm text-blue-800 space-y-1">
               <li>• Consider increasing team member weekly capacity</li>
+              <li>• Add additional team members to handle unscheduled tasks</li>
               <li>• Split large tasks into smaller, manageable chunks</li>
-              <li>• Adjust task priorities to move critical work to week 1</li>
-              <li>• Add additional team members to reduce bottlenecks</li>
+              <li>• Extend planning horizon beyond 12 weeks</li>
             </ul>
           </div>
         )}
