@@ -435,24 +435,6 @@ export default function Resources() {
                             <span>Added {new Date(resource.createdAt).toLocaleDateString()}</span>
                           </div>
 
-                          {/* Utilization Bar */}
-                          <div className="flex items-center space-x-3">
-                            <div className="flex-1">
-                              <div className="w-full bg-gray-200 rounded-full h-2">
-                                <div
-                                  className={`h-2 rounded-full transition-all duration-300 ${
-                                    resource.utilizationPercentage >= 100 ? 'bg-red-500' :
-                                    resource.utilizationPercentage >= 80 ? 'bg-yellow-500' :
-                                    'bg-green-500'
-                                  }`}
-                                  style={{ width: `${Math.min(resource.utilizationPercentage, 100)}%` }}
-                                ></div>
-                              </div>
-                            </div>
-                            <span className={`text-xs px-2 py-1 rounded-full font-medium ${getUtilizationColor(resource.utilizationPercentage)}`}>
-                              {resource.utilizationPercentage}%
-                            </span>
-                          </div>
                         </div>
 
                         {/* Assigned Tasks Summary */}

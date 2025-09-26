@@ -207,11 +207,6 @@ export default function Dashboard() {
                                 {project.status.replace('_', ' ')}
                               </span>
                             </div>
-                            {project.description && (
-                              <p className="mt-1 text-sm text-gray-600 line-clamp-1">
-                                {project.description}
-                              </p>
-                            )}
                           </div>
                           <div className="flex items-center space-x-4 text-sm text-gray-500">
                             <span>{project._count.tasks} tasks</span>

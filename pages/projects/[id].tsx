@@ -6,6 +6,7 @@ import { useRouter } from 'next/router'
 import Link from 'next/link'
 import { authOptions } from '@/lib/auth'
 import { Button } from '@/components/ui/Button'
+import { Modal } from '@/components/ui/Modal'
 import { AssignmentPreviewModal } from '@/components/AssignmentPreviewModal'
 import { AssignmentPreview } from '@/lib/ai/types'
 import { TaskScheduler } from '@/lib/scheduling/taskScheduler'
@@ -84,7 +85,12 @@ const TaskItem: React.FC<TaskItemProps> = ({
   const hasSubtasks = task.subtasks && task.subtasks.length > 0
   const isBreaking = breakingIntoSubtasks.has(task.id)
   const isEditing = editingTask === task.id
-  const indentClass = depth > 0 ? `ml-${Math.min(depth * 6, 24)}` : ''
+  const indentClass = depth > 0 ? `ml-${Math.min(depth * 10, 40)}` : ''
+  const isSubtask = depth > 0
+  const borderClass = isSubtask ? 'border-l-4 border-blue-300' : 'border-l-2 border-gray-200'
+  const backgroundClass = isSubtask ? 'bg-blue-50/50' : 'bg-white'
+  const textSizeClass = isSubtask ? 'text-sm' : 'text-base'
+  const containerClass = isSubtask ? 'rounded-r-md' : ''
 
   // Get timeline information for this task
   const timeline = taskTimelines.get(task.id)
@@ -108,8 +114,8 @@ const TaskItem: React.FC<TaskItemProps> = ({
   }
 
   return (
-    <div className={`border-l-2 border-gray-100 ${indentClass}`}>
-      <div className="p-4 border-b border-gray-100">
+    <div className={`${borderClass} ${backgroundClass} ${indentClass} ${containerClass}`}>
+      <div className={`p-4 border-b border-gray-100 ${textSizeClass}`}>
         {isEditing ? (
           // Edit Mode
           <div className="space-y-4">
@@ -218,7 +224,12 @@ const TaskItem: React.FC<TaskItemProps> = ({
                     </svg>
                   </button>
                 )}
-                <h4 className="text-sm font-medium text-gray-900">{task.title}</h4>
+                <h4 className="text-sm font-medium text-gray-900">
+                  {isSubtask && (
+                    <span className="text-blue-500 mr-2">└─</span>
+                  )}
+                  {task.title}
+                </h4>
                 {hasSubtasks && (
                   <span className="text-xs text-gray-500">({task.subtasks?.length} subtasks)</span>
                 )}
@@ -401,6 +412,7 @@ export default function ProjectDetail() {
   const [taskScheduler] = useState(() => new TaskScheduler())
   const [taskTimelines, setTaskTimelines] = useState<Map<string, any>>(new Map())
   const [resourceSchedules, setResourceSchedules] = useState<Map<string, any>>(new Map())
+  const [showFullDescription, setShowFullDescription] = useState(false)
 
   useEffect(() => {
     if (id) {
@@ -847,7 +859,17 @@ export default function ProjectDetail() {
             <div className="flex justify-between items-start">
               <div>
                 <h2 className="text-2xl font-bold text-gray-900">{project.title}</h2>
-                <p className="mt-2 text-gray-600">{project.description}</p>
+                <div className="mt-2">
+                  <button
+                    onClick={() => setShowFullDescription(true)}
+                    className="text-blue-600 hover:text-blue-800 text-sm font-medium flex items-center space-x-1"
+                  >
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                    </svg>
+                    <span>Show Project Details</span>
+                  </button>
+                </div>
                 <div className="mt-4 flex items-center space-x-4">
                   <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
                     project.status === 'draft' ? 'bg-gray-100 text-gray-800' :
@@ -1119,6 +1141,20 @@ export default function ProjectDetail() {
 
         </div>
       </main>
+
+      {/* Project Description Modal */}
+      <Modal
+        isOpen={showFullDescription}
+        onClose={() => setShowFullDescription(false)}
+        title="Project Description"
+      >
+        <div className="space-y-4">
+          <div className="text-sm text-gray-600">
+            <h3 className="font-medium text-gray-900 mb-2">{project?.title}</h3>
+            <p className="whitespace-pre-wrap">{project?.description}</p>
+          </div>
+        </div>
+      </Modal>
 
       {/* Assignment Preview Modal */}
       <AssignmentPreviewModal
