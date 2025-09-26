@@ -46,8 +46,27 @@ async function handleGetProject(req: NextApiRequest, res: NextApiResponse) {
       },
       include: {
         tasks: {
+          where: {
+            parentTaskId: null // Only get top-level tasks
+          },
           include: {
-            assignee: true
+            assignee: true,
+            subtasks: {
+              include: {
+                assignee: true,
+                subtasks: {
+                  include: {
+                    assignee: true,
+                    subtasks: {
+                      include: {
+                        assignee: true
+                      }
+                    }
+                  }
+                }
+              },
+              orderBy: { priority: 'desc' }
+            }
           },
           orderBy: { priority: 'desc' }
         }

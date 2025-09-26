@@ -8,6 +8,7 @@ import { authOptions } from '@/lib/auth'
 import { Button } from '@/components/ui/Button'
 import { AssignmentPreviewModal } from '@/components/AssignmentPreviewModal'
 import { AssignmentPreview } from '@/lib/ai/types'
+import { TaskScheduler } from '@/lib/scheduling/taskScheduler'
 
 interface Resource {
   id: string
@@ -25,7 +26,9 @@ interface Task {
   priority: number
   status: string
   assignedTo: string | null
+  parentTaskId?: string | null
   assignee?: Resource | null
+  subtasks?: Task[]
 }
 
 interface Project {
@@ -36,6 +39,337 @@ interface Project {
   createdAt: string
   updatedAt: string
   tasks: Task[]
+}
+
+interface TaskItemProps {
+  task: Task
+  resources: Resource[]
+  editingTask: string | null
+  taskUpdates: Record<string, Partial<Task>>
+  expandedTasks: Set<string>
+  breakingIntoSubtasks: Set<string>
+  taskTimelines: Map<string, any>
+  resourceSchedules: Map<string, any>
+  taskScheduler: TaskScheduler
+  depth?: number
+  onEdit: (task: Task) => void
+  onSave: (taskId: string, updates: Partial<Task>) => void
+  onCancel: (taskId: string) => void
+  onUpdate: (taskId: string, field: keyof Task, value: any) => void
+  onDelete: (taskId: string, taskTitle: string) => void
+  onBreakIntoSubtasks: (taskId: string, taskTitle: string) => void
+  onToggleExpansion: (taskId: string) => void
+}
+
+const TaskItem: React.FC<TaskItemProps> = ({
+  task,
+  resources,
+  editingTask,
+  taskUpdates,
+  expandedTasks,
+  breakingIntoSubtasks,
+  taskTimelines,
+  resourceSchedules,
+  taskScheduler,
+  depth = 0,
+  onEdit,
+  onSave,
+  onCancel,
+  onUpdate,
+  onDelete,
+  onBreakIntoSubtasks,
+  onToggleExpansion
+}) => {
+  const isExpanded = expandedTasks.has(task.id)
+  const hasSubtasks = task.subtasks && task.subtasks.length > 0
+  const isBreaking = breakingIntoSubtasks.has(task.id)
+  const isEditing = editingTask === task.id
+  const indentClass = depth > 0 ? `ml-${Math.min(depth * 6, 24)}` : ''
+
+  // Get timeline information for this task
+  const timeline = taskTimelines.get(task.id)
+  const isScheduled = timeline?.isScheduled || false
+  const estimatedStart = timeline?.estimatedStartDate
+  const estimatedEnd = timeline?.estimatedEndDate
+
+  const getPriorityColor = (priority: number) => {
+    if (priority >= 80) return 'bg-red-100 text-red-800'
+    if (priority >= 60) return 'bg-yellow-100 text-yellow-800'
+    return 'bg-green-100 text-green-800'
+  }
+
+  const getStatusColor = (status: string) => {
+    switch (status) {
+      case 'completed': return 'bg-green-100 text-green-800'
+      case 'in_progress': return 'bg-blue-100 text-blue-800'
+      case 'cancelled': return 'bg-gray-100 text-gray-800'
+      default: return 'bg-yellow-100 text-yellow-800'
+    }
+  }
+
+  return (
+    <div className={`border-l-2 border-gray-100 ${indentClass}`}>
+      <div className="p-4 border-b border-gray-100">
+        {isEditing ? (
+          // Edit Mode
+          <div className="space-y-4">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Title</label>
+                <input
+                  type="text"
+                  value={taskUpdates[task.id]?.title || task.title}
+                  onChange={(e) => onUpdate(task.id, 'title', e.target.value)}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Estimated Hours</label>
+                <input
+                  type="number"
+                  min="0"
+                  step="0.5"
+                  value={taskUpdates[task.id]?.estimatedHours || task.estimatedHours || ''}
+                  onChange={(e) => onUpdate(task.id, 'estimatedHours', parseFloat(e.target.value))}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Description</label>
+              <textarea
+                value={taskUpdates[task.id]?.description || task.description || ''}
+                onChange={(e) => onUpdate(task.id, 'description', e.target.value)}
+                rows={3}
+                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Priority (1-100)</label>
+                <input
+                  type="number"
+                  min="1"
+                  max="100"
+                  value={taskUpdates[task.id]?.priority || task.priority}
+                  onChange={(e) => onUpdate(task.id, 'priority', parseInt(e.target.value))}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Status</label>
+                <select
+                  value={taskUpdates[task.id]?.status || task.status}
+                  onChange={(e) => onUpdate(task.id, 'status', e.target.value)}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                >
+                  <option value="pending">Pending</option>
+                  <option value="in_progress">In Progress</option>
+                  <option value="completed">Completed</option>
+                  <option value="cancelled">Cancelled</option>
+                </select>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Assigned To</label>
+                <select
+                  value={taskUpdates[task.id]?.assignedTo || ''}
+                  onChange={(e) => onUpdate(task.id, 'assignedTo', e.target.value || null)}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                >
+                  <option value="">Unassigned</option>
+                  {resources.map((resource) => (
+                    <option key={resource.id} value={resource.id}>
+                      {resource.name} ({resource.role})
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+
+            <div className="flex space-x-3 pt-2">
+              <Button onClick={() => onSave(task.id, taskUpdates[task.id] || {})} size="sm">
+                Save Changes
+              </Button>
+              <Button variant="outline" onClick={() => onCancel(task.id)} size="sm">
+                Cancel
+              </Button>
+            </div>
+          </div>
+        ) : (
+          // View Mode
+          <div className="space-y-3">
+            {/* Task Header */}
+            <div className="flex items-center justify-between">
+              <div className="flex items-center space-x-3">
+                {hasSubtasks && (
+                  <button
+                    onClick={() => onToggleExpansion(task.id)}
+                    className="text-gray-400 hover:text-gray-600 focus:outline-none"
+                  >
+                    <svg
+                      className={`w-4 h-4 transition-transform ${isExpanded ? 'transform rotate-90' : ''}`}
+                      fill="none"
+                      stroke="currentColor"
+                      viewBox="0 0 24 24"
+                    >
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 5l7 7-7 7" />
+                    </svg>
+                  </button>
+                )}
+                <h4 className="text-sm font-medium text-gray-900">{task.title}</h4>
+                {hasSubtasks && (
+                  <span className="text-xs text-gray-500">({task.subtasks?.length} subtasks)</span>
+                )}
+              </div>
+
+              <div className="flex space-x-2">
+                <Button variant="outline" size="sm" onClick={() => onEdit(task)}>
+                  <div className="flex items-center space-x-1">
+                    <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                    </svg>
+                    <span>Edit</span>
+                  </div>
+                </Button>
+
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => onBreakIntoSubtasks(task.id, task.title)}
+                  disabled={isBreaking}
+                  className="text-blue-600 border-blue-300 hover:bg-blue-50"
+                >
+                  {isBreaking ? (
+                    <div className="flex items-center space-x-1">
+                      <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-blue-600"></div>
+                      <span>Breaking...</span>
+                    </div>
+                  ) : (
+                    <div className="flex items-center space-x-1">
+                      <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                      </svg>
+                      <span>Break Down</span>
+                    </div>
+                  )}
+                </Button>
+
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => onDelete(task.id, task.title)}
+                  className="text-red-600 border-red-300 hover:bg-red-50 hover:border-red-400"
+                >
+                  <div className="flex items-center space-x-1">
+                    <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                    </svg>
+                    <span>Delete</span>
+                  </div>
+                </Button>
+              </div>
+            </div>
+
+            {/* Task Details */}
+            {task.description && (
+              <p className="text-sm text-gray-600 ml-7">{task.description}</p>
+            )}
+
+            <div className="flex items-center space-x-4 text-sm text-gray-500 ml-7">
+              {task.estimatedHours && (
+                <span className="flex items-center">
+                  <svg className="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                  </svg>
+                  {task.estimatedHours}h
+                </span>
+              )}
+              <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${getPriorityColor(task.priority)}`}>
+                Priority {task.priority}
+              </span>
+              <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${getStatusColor(task.status)}`}>
+                {task.status.replace('_', ' ').toUpperCase()}
+              </span>
+              {task.assignee ? (
+                <span className="flex items-center">
+                  <svg className="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+                  </svg>
+                  {task.assignee.name}
+                </span>
+              ) : (
+                <span className="text-xs text-gray-400">Unassigned</span>
+              )}
+            </div>
+
+            {/* Timeline Information */}
+            {task.assignedTo && task.estimatedHours && (
+              <div className="mt-2 ml-7">
+                <div className="flex items-center space-x-4 text-xs text-gray-600">
+                  {isScheduled ? (
+                    <>
+                      <span className="flex items-center">
+                        <svg className="w-3 h-3 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                        </svg>
+                        Start: {taskScheduler.formatDate(estimatedStart)}
+                      </span>
+                      <span className="flex items-center">
+                        <svg className="w-3 h-3 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                        </svg>
+                        End: {taskScheduler.formatDate(estimatedEnd)}
+                      </span>
+                      <span className="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-green-100 text-green-700">
+                        Scheduled
+                      </span>
+                    </>
+                  ) : (
+                    <span className="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-yellow-100 text-yellow-700">
+                      <svg className="w-3 h-3 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.664-.833-2.464 0L4.35 16.5c-.77.833.192 2.5 1.732 2.5z" />
+                      </svg>
+                      Resource overloaded
+                    </span>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* Subtasks */}
+      {isExpanded && hasSubtasks && (
+        <div className="bg-gray-25">
+          {task.subtasks?.map((subtask) => (
+            <TaskItem
+              key={subtask.id}
+              task={subtask}
+              resources={resources}
+              editingTask={editingTask}
+              taskUpdates={taskUpdates}
+              expandedTasks={expandedTasks}
+              breakingIntoSubtasks={breakingIntoSubtasks}
+              taskTimelines={taskTimelines}
+              resourceSchedules={resourceSchedules}
+              taskScheduler={taskScheduler}
+              depth={depth + 1}
+              onEdit={onEdit}
+              onSave={onSave}
+              onCancel={onCancel}
+              onUpdate={onUpdate}
+              onDelete={onDelete}
+              onBreakIntoSubtasks={onBreakIntoSubtasks}
+              onToggleExpansion={onToggleExpansion}
+            />
+          ))}
+        </div>
+      )}
+    </div>
+  )
 }
 
 export default function ProjectDetail() {
@@ -62,12 +396,27 @@ export default function ProjectDetail() {
     estimatedHours: '',
     priority: '50'
   })
+  const [expandedTasks, setExpandedTasks] = useState<Set<string>>(new Set())
+  const [breakingIntoSubtasks, setBreakingIntoSubtasks] = useState<Set<string>>(new Set())
+  const [taskScheduler] = useState(() => new TaskScheduler())
+  const [taskTimelines, setTaskTimelines] = useState<Map<string, any>>(new Map())
+  const [resourceSchedules, setResourceSchedules] = useState<Map<string, any>>(new Map())
 
   useEffect(() => {
     if (id) {
       fetchProjectAndResources()
     }
   }, [id])
+
+  // Calculate schedules when project or resources change
+  useEffect(() => {
+    if (project && project.tasks.length > 0) {
+      const { taskTimelines: newTaskTimelines, resourceSchedules: newResourceSchedules } =
+        taskScheduler.calculateProjectSchedule(project.tasks as any)
+      setTaskTimelines(newTaskTimelines)
+      setResourceSchedules(newResourceSchedules)
+    }
+  }, [project, taskScheduler])
 
   const fetchProjectAndResources = async () => {
     try {
@@ -371,7 +720,7 @@ export default function ProjectDetail() {
   }
 
   const handleDeleteTask = async (taskId: string, taskTitle: string) => {
-    if (!confirm(`Are you sure you want to delete the task "${taskTitle}"? This action cannot be undone.`)) {
+    if (!confirm(`Are you sure you want to delete the task "${taskTitle}"? This action cannot be undone and will also delete all its subtasks.`)) {
       return
     }
 
@@ -392,6 +741,53 @@ export default function ProjectDetail() {
       console.error('Error deleting task:', error)
       alert('Failed to delete task')
     }
+  }
+
+  const handleBreakIntoSubtasks = async (taskId: string, taskTitle: string) => {
+    if (!confirm(`Break "${taskTitle}" into smaller subtasks using AI?`)) {
+      return
+    }
+
+    setBreakingIntoSubtasks(prev => new Set(Array.from(prev).concat(taskId)))
+
+    try {
+      const response = await fetch(`/api/projects/${id}/tasks/${taskId}/break-into-subtasks`, {
+        method: 'POST',
+      })
+
+      if (response.ok) {
+        const result = await response.json()
+        alert(`Successfully created ${result.subtasks.length} subtasks`)
+        // Expand the parent task to show new subtasks
+        setExpandedTasks(prev => new Set(Array.from(prev).concat(taskId)))
+        // Refresh project data
+        await fetchProjectAndResources()
+      } else {
+        const error = await response.json()
+        alert(error.message || 'Failed to break task into subtasks')
+      }
+    } catch (error) {
+      console.error('Error breaking task into subtasks:', error)
+      alert('Failed to break task into subtasks')
+    } finally {
+      setBreakingIntoSubtasks(prev => {
+        const newSet = new Set(prev)
+        newSet.delete(taskId)
+        return newSet
+      })
+    }
+  }
+
+  const toggleTaskExpansion = (taskId: string) => {
+    setExpandedTasks(prev => {
+      const newSet = new Set(prev)
+      if (newSet.has(taskId)) {
+        newSet.delete(taskId)
+      } else {
+        newSet.add(taskId)
+      }
+      return newSet
+    })
   }
 
   if (isLoading) {
@@ -697,185 +1093,30 @@ export default function ProjectDetail() {
             ) : (
               <div className="divide-y divide-gray-200">
                 {project.tasks.map((task) => (
-                  <div key={task.id} className="p-6">
-                    {editingTask === task.id ? (
-                      // Edit Mode
-                      <div className="space-y-4">
-                        <div>
-                          <label className="block text-sm font-medium text-gray-700 mb-1">Title</label>
-                          <input
-                            type="text"
-                            value={taskUpdates[task.id]?.title || ''}
-                            onChange={(e) => updateTaskField(task.id, 'title', e.target.value)}
-                            className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                          />
-                        </div>
-
-                        <div>
-                          <label className="block text-sm font-medium text-gray-700 mb-1">Description</label>
-                          <textarea
-                            value={taskUpdates[task.id]?.description || ''}
-                            onChange={(e) => updateTaskField(task.id, 'description', e.target.value)}
-                            rows={2}
-                            className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                          />
-                        </div>
-
-                        <div className="grid grid-cols-3 gap-4">
-                          <div>
-                            <label className="block text-sm font-medium text-gray-700 mb-1">Estimated Hours</label>
-                            <input
-                              type="number"
-                              min="0.1"
-                              step="0.5"
-                              value={taskUpdates[task.id]?.estimatedHours || 0}
-                              onChange={(e) => updateTaskField(task.id, 'estimatedHours', parseFloat(e.target.value))}
-                              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                            />
-                          </div>
-
-                          <div>
-                            <label className="block text-sm font-medium text-gray-700 mb-1">Priority (1-100)</label>
-                            <input
-                              type="number"
-                              min="1"
-                              max="100"
-                              value={taskUpdates[task.id]?.priority || 50}
-                              onChange={(e) => updateTaskField(task.id, 'priority', parseInt(e.target.value))}
-                              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                            />
-                          </div>
-
-                          <div>
-                            <label className="block text-sm font-medium text-gray-700 mb-1">Status</label>
-                            <select
-                              value={taskUpdates[task.id]?.status || 'pending'}
-                              onChange={(e) => updateTaskField(task.id, 'status', e.target.value)}
-                              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                            >
-                              <option value="pending">Pending</option>
-                              <option value="in_progress">In Progress</option>
-                              <option value="completed">Completed</option>
-                              <option value="cancelled">Cancelled</option>
-                            </select>
-                          </div>
-                        </div>
-
-                        <div>
-                          <label className="block text-sm font-medium text-gray-700 mb-1">Assigned To</label>
-                          <select
-                            value={taskUpdates[task.id]?.assignedTo || ''}
-                            onChange={(e) => updateTaskField(task.id, 'assignedTo', e.target.value || null)}
-                            className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                          >
-                            <option value="">Unassigned</option>
-                            {resources.map((resource) => (
-                              <option key={resource.id} value={resource.id}>
-                                {resource.name} ({resource.role})
-                              </option>
-                            ))}
-                          </select>
-                        </div>
-
-                        <div className="flex space-x-3 pt-2">
-                          <Button
-                            onClick={() => handleTaskUpdate(task.id, taskUpdates[task.id] || {})}
-                            size="sm"
-                          >
-                            Save Changes
-                          </Button>
-                          <Button
-                            variant="outline"
-                            onClick={() => cancelEditing(task.id)}
-                            size="sm"
-                          >
-                            Cancel
-                          </Button>
-                        </div>
-                      </div>
-                    ) : (
-                      // View Mode
-                      <div className="flex justify-between items-start">
-                        <div className="flex-1">
-                          <div className="flex items-center justify-between">
-                            <h4 className="text-sm font-medium text-gray-900">{task.title}</h4>
-                            <div className="flex space-x-2">
-                              <Button
-                                variant="outline"
-                                size="sm"
-                                onClick={() => startEditing(task)}
-                              >
-                                <div className="flex items-center space-x-1">
-                                  <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
-                                  </svg>
-                                  <span>Edit</span>
-                                </div>
-                              </Button>
-                              <Button
-                                variant="outline"
-                                size="sm"
-                                onClick={() => handleDeleteTask(task.id, task.title)}
-                                className="text-red-600 border-red-300 hover:bg-red-50 hover:border-red-400"
-                              >
-                                <div className="flex items-center space-x-1">
-                                  <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                                  </svg>
-                                  <span>Delete</span>
-                                </div>
-                              </Button>
-                            </div>
-                          </div>
-
-                          {task.description && (
-                            <p className="mt-1 text-sm text-gray-600">{task.description}</p>
-                          )}
-
-                          <div className="mt-2 flex items-center space-x-4 text-sm text-gray-500">
-                            {task.estimatedHours && (
-                              <span>Est: {task.estimatedHours}h</span>
-                            )}
-                            <span>Priority: {task.priority}/100</span>
-                            <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${
-                              task.status === 'pending' ? 'bg-yellow-100 text-yellow-800' :
-                              task.status === 'in_progress' ? 'bg-blue-100 text-blue-800' :
-                              task.status === 'completed' ? 'bg-green-100 text-green-800' :
-                              'bg-red-100 text-red-800'
-                            }`}>
-                              {task.status.replace('_', ' ')}
-                            </span>
-                          </div>
-
-                          {task.assignedTo ? (
-                            task.assignee ? (
-                              <div className="mt-2 flex items-center space-x-2">
-                                <span className="text-xs text-gray-500">Assigned to:</span>
-                                <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-blue-50 text-blue-700">
-                                  {task.assignee.name} ({task.assignee.role})
-                                </span>
-                              </div>
-                            ) : (
-                              <div className="mt-2 flex items-center space-x-2">
-                                <span className="text-xs text-gray-500">Assigned to:</span>
-                                <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-50 text-gray-700">
-                                  Resource ID: {task.assignedTo}
-                                </span>
-                              </div>
-                            )
-                          ) : (
-                            <div className="mt-2 flex items-center space-x-2">
-                              <span className="text-xs text-gray-400">Unassigned</span>
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                    )}
-                  </div>
+                  <TaskItem
+                    key={task.id}
+                    task={task}
+                    resources={resources}
+                    editingTask={editingTask}
+                    taskUpdates={taskUpdates}
+                    expandedTasks={expandedTasks}
+                    breakingIntoSubtasks={breakingIntoSubtasks}
+                    taskTimelines={taskTimelines}
+                    resourceSchedules={resourceSchedules}
+                    taskScheduler={taskScheduler}
+                    onEdit={startEditing}
+                    onSave={handleTaskUpdate}
+                    onCancel={cancelEditing}
+                    onUpdate={updateTaskField}
+                    onDelete={handleDeleteTask}
+                    onBreakIntoSubtasks={handleBreakIntoSubtasks}
+                    onToggleExpansion={toggleTaskExpansion}
+                  />
                 ))}
               </div>
             )}
           </div>
+
         </div>
       </main>
 

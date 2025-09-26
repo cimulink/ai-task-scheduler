@@ -7,6 +7,7 @@ import { authOptions } from '@/lib/auth'
 import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
 import { Modal } from '@/components/ui/Modal'
+import { TaskScheduler } from '@/lib/scheduling/taskScheduler'
 
 interface Task {
   id: string
@@ -35,6 +36,29 @@ interface Resource {
   utilizationPercentage: number
 }
 
+interface Project {
+  id: string
+  title: string
+  status: string
+  tasks: TaskWithSchedule[]
+}
+
+interface TaskWithSchedule {
+  id: string
+  title: string
+  estimatedHours: number | null
+  priority: number
+  status: string
+  assignedTo: string | null
+  assignee?: {
+    id: string
+    name: string
+    weeklyHours: number
+  } | null
+  parentTaskId?: string | null
+  subtasks?: TaskWithSchedule[]
+}
+
 const ROLES = [
   'Designer',
   'Developer',
@@ -58,9 +82,22 @@ export default function Resources() {
     skills: ''
   })
 
+  // Scheduling state
+  const [taskScheduler] = useState(() => new TaskScheduler())
+  const [allProjects, setAllProjects] = useState<Project[]>([])
+  const [resourceSchedules, setResourceSchedules] = useState<Map<string, any>>(new Map())
+  const [isLoadingSchedules, setIsLoadingSchedules] = useState(false)
+
   useEffect(() => {
     fetchResources()
+    fetchAllProjects()
   }, [])
+
+  useEffect(() => {
+    if (allProjects.length > 0) {
+      calculateResourceSchedules()
+    }
+  }, [allProjects, taskScheduler])
 
   const fetchResources = async () => {
     try {
@@ -76,6 +113,40 @@ export default function Resources() {
     } finally {
       setIsLoading(false)
     }
+  }
+
+  const fetchAllProjects = async () => {
+    setIsLoadingSchedules(true)
+    try {
+      const response = await fetch('/api/projects')
+      if (response.ok) {
+        const projectsData = await response.json()
+        setAllProjects(projectsData)
+      } else {
+        console.error('Failed to fetch projects')
+      }
+    } catch (error) {
+      console.error('Error fetching projects:', error)
+    } finally {
+      setIsLoadingSchedules(false)
+    }
+  }
+
+  const calculateResourceSchedules = () => {
+    if (allProjects.length === 0) return
+
+    // Combine all tasks from all projects
+    const allTasks: TaskWithSchedule[] = []
+    allProjects.forEach(project => {
+      if (project.tasks) {
+        allTasks.push(...project.tasks)
+      }
+    })
+
+    if (allTasks.length === 0) return
+
+    const { resourceSchedules: newResourceSchedules } = taskScheduler.calculateProjectSchedule(allTasks)
+    setResourceSchedules(newResourceSchedules)
   }
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
@@ -407,6 +478,75 @@ export default function Resources() {
                                 <span className="text-xs text-gray-500">
                                   +{resource.assignedTasks.length - 3} more
                                 </span>
+                              )}
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Weekly Schedule */}
+                        {resourceSchedules.has(resource.id) && (
+                          <div className="mt-4">
+                            <div className="flex items-center justify-between mb-3">
+                              <h5 className="text-sm font-medium text-gray-700">Weekly Schedule</h5>
+                              {isLoadingSchedules && (
+                                <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-500"></div>
+                              )}
+                            </div>
+                            <div className="bg-gray-50 rounded-lg p-3">
+                              <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                                {resourceSchedules.get(resource.id)?.weeks
+                                  ?.filter((week: any) => week.assignedHours > 0)
+                                  .slice(0, 4) // Show first 4 weeks with assignments
+                                  .map((week: any) => (
+                                  <div key={week.weekNumber} className="bg-white rounded border p-2">
+                                    <div className="flex justify-between items-center mb-1">
+                                      <span className="text-xs font-medium text-gray-900">
+                                        Week {week.weekNumber}
+                                      </span>
+                                      <span className="text-xs text-gray-500">
+                                        {week.assignedHours}h
+                                      </span>
+                                    </div>
+                                    {/* Mini workload bar */}
+                                    <div className="w-full bg-gray-200 rounded-full h-1 mb-1">
+                                      <div
+                                        className={`h-1 rounded-full ${
+                                          week.assignedHours > resource.weeklyHours
+                                            ? 'bg-red-500'
+                                            : week.assignedHours > resource.weeklyHours * 0.8
+                                            ? 'bg-yellow-500'
+                                            : 'bg-green-500'
+                                        }`}
+                                        style={{
+                                          width: `${Math.min(
+                                            (week.assignedHours / resource.weeklyHours) * 100,
+                                            100
+                                          )}%`
+                                        }}
+                                      ></div>
+                                    </div>
+                                    {/* Tasks for this week */}
+                                    <div className="space-y-1">
+                                      {week.tasks.slice(0, 2).map((task: any) => (
+                                        <div key={task.taskId} className="text-xs text-gray-600">
+                                          <div className="truncate">
+                                            {task.title.length > 15 ? `${task.title.substring(0, 15)}...` : task.title}
+                                          </div>
+                                        </div>
+                                      ))}
+                                      {week.tasks.length > 2 && (
+                                        <div className="text-xs text-gray-400">
+                                          +{week.tasks.length - 2} more
+                                        </div>
+                                      )}
+                                    </div>
+                                  </div>
+                                ))}
+                              </div>
+                              {resourceSchedules.get(resource.id)?.weeks?.filter((week: any) => week.assignedHours > 0).length === 0 && (
+                                <div className="text-center py-4 text-xs text-gray-500">
+                                  No tasks scheduled
+                                </div>
                               )}
                             </div>
                           </div>
